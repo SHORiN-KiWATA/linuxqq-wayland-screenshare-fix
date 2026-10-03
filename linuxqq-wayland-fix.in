@@ -12,6 +12,8 @@
 #   QQ_WAYLAND_FIX_ANGLE      ANGLE 后端：auto（默认，检测到 Vulkan 时用 vulkan）| vulkan | swiftshader | off
 #   QQ_WL_NATIVE_DISABLE=1    关闭屏幕共享修复（排查问题用）
 #   QQ_WL_FRAME_REUSE_DISABLE=1 关闭「复用采集纹理」（排查共享时内存增长用）
+#   QQ_NVENC=1                屏幕共享改用 NVENC 编 H.264（实验，默认关）
+#   QQ_NVENC_ACTIVE=1         配合 QQ_NVENC=1：真正启用 NVENC 编码（默认只挂钩旁观）
 #   QQ_CLIPBOARD_FIX_DISABLE=1 关闭剪贴板修复（排查问题用）
 #   QQ_CLIPBOARD_FIX_FORCE=1   强制启用剪贴板修复（KDE 上默认禁用，仅供测试）
 #   QQ_SCREENSHOT_FIX_DISABLE=1 关闭截图防闪退（排查问题用）
@@ -26,6 +28,7 @@ SCREENSHARE_LIB="$LIBDIR/libqq-wl-portal.so"
 CLIPBOARD_LIB="$LIBDIR/libqq-clipbridge.so"
 SCREENSHOT_LIB="$LIBDIR/libqq-screenshot.so"
 BORDERFIX_LIB="$LIBDIR/libqq-borderfix.so"
+NVENC_LIB="$LIBDIR/libqq-nvenc.so"
 LOG="${QQ_WAYLAND_FIX_LOG:-${XDG_RUNTIME_DIR:-/tmp}/linuxqq-wayland-fix.log}"
 QQ_CRASH_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/QQ/crash_files"
 CRASH_KEEP="${XDG_CACHE_HOME:-$HOME/.cache}/linuxqq-wayland-fix/crash"
@@ -338,6 +341,16 @@ doctor() {
             note "共享时防闪退：QQ 改了实现，显示器坐标不从 0 开始时共享可能闪退（issue #1）"
         fi
     fi
+    # NVENC 编码器替换（见 qq-nvenc.c）：挂钩点是 CreateH264Encoder 的入口字节，必须唯一且不变
+    if [[ -e "$LIBDIR/libqq-nvenc.so" ]]; then
+        if [[ -z "$av" ]]; then
+            note "NVENC：找不到 libAVSDKPlugin.so，无法检查挂钩点"
+        elif [[ $(LC_ALL=C grep -obaF $'\x55\x48\x89\xfd\xbf\x10\x02\x00\x00\x53\x48\x83\xec\x08' "$av" 2>/dev/null | wc -l) == 1 ]]; then
+            pass "NVENC：CreateH264Encoder 入口字节与挂钩点一致"
+        else
+            note "NVENC：libAVSDKPlugin.so 的编码器入口变了，QQ_NVENC=1 会拒绝挂钩并走软件编码"
+        fi
+    fi
     if [[ -z "$wrapper" ]]; then
         note "找不到 wrapper.node，跳过剪贴板检查"
     elif grep -aq XSetSelectionOwner "$wrapper"; then
@@ -513,7 +526,7 @@ if [[ -z "$QQ" ]]; then
 fi
 
 preload=""
-for lib in "$SCREENSHARE_LIB" "$CLIPBOARD_LIB" "$SCREENSHOT_LIB" "$BORDERFIX_LIB"; do
+for lib in "$SCREENSHARE_LIB" "$CLIPBOARD_LIB" "$SCREENSHOT_LIB" "$BORDERFIX_LIB" "$NVENC_LIB"; do
     [[ "$lib" == "$CLIPBOARD_LIB" ]] && clipboard_auto_disabled && continue
     [[ -r "$lib" ]] && preload="${preload:+$preload:}$lib"
 done
