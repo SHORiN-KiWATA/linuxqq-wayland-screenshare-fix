@@ -88,7 +88,7 @@ QQ 本体需另外安装（[官方下载](https://im.qq.com/linuxqq/)）。
 
 - 源码
 
-    依赖：C 编译器、make、pkg-config、wayland-scanner，以及 glib2（gio）、libX11、libwayland-client 的开发文件；libpulse、libpipewire-0.3 的开发文件（只用头文件，运行时不依赖）。
+    依赖：C 编译器、make、pkg-config、wayland-scanner，以及 glib2（gio）、libX11、libwayland-client 的开发文件；libpulse、libpipewire-0.3 的开发文件（只用头文件，运行时不依赖）。可选：想启用屏幕共享的硬件编码（NVENC）需要 ffnvcodec 的 `nvEncodeAPI.h` —— Debian/Ubuntu 装 `libffmpeg-nvenc-dev`，Arch 装 `nv-codec-headers`；没有这个头文件时只会跳过 `libqq-nvenc.so`，其余照常编译。
   
     ```bash
     make
@@ -139,10 +139,23 @@ QQ 本体需另外安装（[官方下载](https://im.qq.com/linuxqq/)）。
 linuxqq-wayland-fix --doctor
 ```
 
+### 可选：屏幕共享改用 GPU 硬件编码（NVENC，实验）
+
+QQ 在 Linux 上共享屏幕时用的是它自带的软件编码器（AVSDK 里静态编入的 OpenH264），不看显卡。本仓库额外提供 `libqq-nvenc.so`，把这一路的编码器换成 NVIDIA 的 NVENC：
+
+```bash
+QQ_NVENC=1 QQ_NVENC_ACTIVE=1 linuxqq-wayland-fix
+```
+
+- 需要 NVIDIA 显卡和驱动（`libnvidia-encode.so.1` 可用），并要求 `--doctor` 里出现 `NVENC：CreateH264Encoder 入口字节与挂钩点一致`；
+- 只带 `QQ_NVENC=1` 时**只挂钩旁观**，行为与不注入完全一致，用于排查；
+- 任何一步失败都会**自动回落到原来的软件编码**；不设 `QQ_NVENC` 时完全惰性；
+- 原理、结构偏移与输出契约见 [原理详解](docs/原理详解.md)。
+
 ## 已知问题或解决办法
 
 - 使用 Easy Effects 时，需在它的输入和输入排除名单里都加上 `TRAE`，否则 QQ 一开共享就会崩；
-- 流畅度取决于 QQ 自己的编码，大概只有 20 帧左右；
+- 流畅度取决于 QQ 自己的编码，大概只有 20 帧左右（想改用 GPU 硬件编码见上）；
 - 观看别人共享时出现花屏或者显示不全的情况可以尝试调整`QQ_WAYLAND_FIX_ANGLE`环境变量的值，具体可用的值通过`linuxqq-wayland-fix -h`命令查看。详见 [原理详解](docs/原理详解.md#附观看共享花屏)。
 
 详细说明见 [常见问题与排错](docs/常见问题与排错.md)。

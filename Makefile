@@ -30,6 +30,20 @@ SS_LIB     := libqq-wl-portal.so
 CB_LIB     := libqq-clipbridge.so
 SH_LIB     := libqq-screenshot.so
 BF_LIB     := libqq-borderfix.so
+# H.264 编码器替换（NVENC）：默认不生效，QQ_NVENC=1 挂钩、QQ_NVENC_ACTIVE=1 才真正用 NVENC。
+# 需要 ffnvcodec 的 nvEncodeAPI.h（Debian/Ubuntu: libffmpeg-nvenc-dev；Arch: nv-codec-headers）；
+# 头文件不在就不编这个库，其余目标不受影响。
+NVENC_INC  ?= /usr/include
+NVENC_HDR  := $(NVENC_INC)/ffnvcodec/nvEncodeAPI.h
+NV_LIB     := libqq-nvenc.so
+ifeq ($(wildcard $(NVENC_HDR)),)
+NVENC_BUILD :=
+$(info 提示：找不到 $(NVENC_HDR)，all/install 会跳过 $(NV_LIB)。)
+$(info       要启用：Debian/Ubuntu 装 libffmpeg-nvenc-dev，Arch 装 nv-codec-headers，)
+$(info       或者用 make NVENC_INC=<含 ffnvcodec/ 的 include 目录> 指定自己的头文件位置。)
+else
+NVENC_BUILD := 1
+endif
 SHOT_HELPER := qq-screenshot-helper
 SHOT_HELPER_DESKTOP := $(SHOT_HELPER).desktop
 CMD        := $(NAME)
@@ -37,7 +51,9 @@ CB_PROTOCOLS := ext-data-control-v1 wlr-data-control-unstable-v1
 CB_GEN_H   := $(CB_PROTOCOLS:%=build/%-client-protocol.h)
 CB_GEN_C   := $(CB_PROTOCOLS:%=build/%-protocol.c)
 
-all: $(SS_LIB) $(CB_LIB) $(SH_LIB) $(BF_LIB) $(SHOT_HELPER) $(SHOT_HELPER_DESKTOP) $(CMD)
+ALL_LIBS := $(SS_LIB) $(CB_LIB) $(SH_LIB) $(BF_LIB) $(if $(NVENC_BUILD),$(NV_LIB))
+
+all: $(ALL_LIBS) $(SHOT_HELPER) $(SHOT_HELPER_DESKTOP) $(CMD)
 
 build/qq-wl-portal.o: src/qq-wl-portal.c
 	@mkdir -p build
@@ -82,6 +98,16 @@ $(BF_LIB): src/qq-borderfix.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -Wall -Wextra \
 	    $(LDFLAGS) -shared -Wl,-z,defs -o $@ src/qq-borderfix.c -lpthread -ldl
 
+# H.264 编码器替换（NVENC）：默认不生效，QQ_NVENC=1 时在 ppapi 里挂钩 AVSDK 的编码器工厂
+$(NV_LIB): src/qq-nvenc.c
+	@if [ ! -f "$(NVENC_HDR)" ]; then \
+	    echo "make: 编 $(NV_LIB) 需要 $(NVENC_HDR)"; \
+	    echo "      请装 libffmpeg-nvenc-dev（Debian/Ubuntu）或 nv-codec-headers（Arch），"; \
+	    echo "      或用 make NVENC_INC=<含 ffnvcodec/ 的 include 目录> 指定位置。"; \
+	    exit 1; fi
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(NVENC_INC) -fPIC -Wall -Wextra \
+	    $(LDFLAGS) -shared -Wl,-z,defs -o $@ src/qq-nvenc.c -lpthread -ldl
+
 $(CMD): $(CMD).in
 	sed -e 's|@LIBEXECDIR@|$(LIBEXECDIR)|g' -e 's|@VERSION@|$(VERSION)|g' $< > $@
 	chmod +x $@
@@ -91,6 +117,7 @@ install: all
 	install -Dm755 $(CB_LIB)         $(DESTDIR)$(LIBEXECDIR)/$(CB_LIB)
 	install -Dm755 $(SH_LIB)         $(DESTDIR)$(LIBEXECDIR)/$(SH_LIB)
 	install -Dm755 $(BF_LIB)         $(DESTDIR)$(LIBEXECDIR)/$(BF_LIB)
+	if [ -n "$(NVENC_BUILD)" ]; then install -Dm755 $(NV_LIB) $(DESTDIR)$(LIBEXECDIR)/$(NV_LIB); fi
 	install -Dm755 $(SHOT_HELPER)     $(DESTDIR)$(LIBEXECDIR)/$(SHOT_HELPER)
 	install -Dm644 $(SHOT_HELPER_DESKTOP) $(DESTDIR)$(DATADIR)/applications/$(SHOT_HELPER_DESKTOP)
 	install -Dm755 $(CMD)            $(DESTDIR)$(BINDIR)/$(CMD)
@@ -100,7 +127,7 @@ install: all
 	install -Dm644 LICENSE           $(DESTDIR)$(DATADIR)/licenses/$(NAME)/LICENSE
 
 clean:
-	rm -rf build src/*.o $(SS_LIB) $(CB_LIB) $(SH_LIB) $(BF_LIB) $(SHOT_HELPER) $(SHOT_HELPER_DESKTOP) $(CMD)
+	rm -rf build src/*.o $(SS_LIB) $(CB_LIB) $(SH_LIB) $(BF_LIB) $(NV_LIB) $(SHOT_HELPER) $(SHOT_HELPER_DESKTOP) $(CMD)
 
 print-version:
 	@echo $(VERSION)
